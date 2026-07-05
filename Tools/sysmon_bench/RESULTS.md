@@ -120,3 +120,52 @@ loop head shares the yield's line (kept for resume semantics); real
 coverage.py enables PY_RESUME, whose instrumented RESUME makes those
 locations fire once and get disabled, so this matters less in practice
 than the minimal_line numbers suggest.
+
+## Opt 3: don't instrument events with no registered callback (labels `ab3-*`)
+
+Instrumentation now only rewrites bytecode for (tool, event) pairs that
+have a callback registered. coverage.py's line mode enables local events
+`LINE | PY_RETURN | PY_RESUME` but never registers PY_RETURN/PY_RESUME
+callbacks (and arcs mode never registers PY_RESUME), so before this
+change every return of traced code executed INSTRUMENTED_RETURN_VALUE
+and every generator resume INSTRUMENTED_RESUME just to find a NULL
+callback — Opt 1 made that cheaper; this removes it entirely.
+
+If a callback is registered (or unregistered) later, the global
+instrumentation version is bumped and executing code objects are
+refreshed, so events flow exactly as before — verified with
+late-registration probes and the full monitoring test matrix. The CALL
+instrumentation is kept when only C_RETURN/C_RAISE callbacks exist
+(grouped events). One behavior nuance: unregistering and re-registering
+a callback now re-arms locations the tool had DISABLEd, matching the
+existing behavior of clearing and re-setting the event set.
+
+**Builds on nothing but subsumes part of Opt 1's win** (Opt 1 still
+covers multi-tool partial-NULL dispatch and non-instrumented events).
+Measured stacked on Opt 1+2, interleaved A/B (`results/ab3-*.json`),
+steady state:
+
+| workload/mode | steady Δ vs Opt1+2 | replica_line overhead vs baseline `none` |
+|---|---:|---|
+| generators/replica_line | **−19.4%** | 1.35x → **1.01x** |
+| generators/replica_branch | **−18.4%** | 1.34x → 1.01x |
+| calls/replica_line | **−13.2%** | 1.21x → **1.01x** |
+| deltablue/replica_line | **−12.4%** | 1.17x → **1.00x** |
+| nqueens/replica_line | **−9.7%** | 1.33x → **1.10x** |
+| richards/replica_line | **−8.9%** | 1.14x → **1.00x** |
+| codegen/replica_branch (warm) | −4.9% | fewer instrumented opcodes to write/restore |
+| minimal_line / none modes | ±1% | unaffected, as expected |
+
+## Cumulative: coverage.py sysmon replica overhead, baseline → Opt 1+2+3
+
+Steady-state overhead vs uninstrumented (`none`), same-session numbers:
+
+| workload | baseline replica_line | after opt 1+2+3 |
+|---|---:|---:|
+| richards | 1.14x | **1.00x** |
+| deltablue | 1.17x | **1.00x** |
+| nqueens | 1.33x | **1.10x** |
+| calls | 1.21x | **1.01x** |
+| generators | 1.35x | **1.01x** |
+| pygments_hl | 1.00x | 1.00x |
+| hotloop | 1.00x | 1.00x |

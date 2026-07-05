@@ -1,0 +1,200 @@
+{
+ "label": "ab3-opt1prune-r1",
+ "python": "./python.opt1prune",
+ "reps": 4,
+ "results": {
+  "calls/minimal_line": {
+   "steady_ns": 16929632.333333332,
+   "tool_summary": {
+    "files": 1,
+    "points": 12
+   },
+   "warm_ns": 17461286
+  },
+  "calls/none": {
+   "steady_ns": 17339787,
+   "tool_summary": {
+    "files": 0,
+    "points": 0
+   },
+   "warm_ns": 17349279
+  },
+  "calls/replica_branch": {
+   "steady_ns": 17176645.333333332,
+   "tool_summary": {
+    "files": 1,
+    "points": 17
+   },
+   "warm_ns": 17649044
+  },
+  "calls/replica_line": {
+   "steady_ns": 19829745.333333332,
+   "tool_summary": {
+    "files": 1,
+    "points": 12
+   },
+   "warm_ns": 20406121
+  },
+  "codegen/minimal_line": {
+   "steady_ns": 56688626,
+   "tool_summary": {
+    "files": 5,
+    "points": 29786
+   },
+   "warm_ns": 65296748
+  },
+  "codegen/none": {
+   "steady_ns": 54612095.333333336,
+   "tool_summary": {
+    "files": 0,
+    "points": 0
+   },
+   "warm_ns": 62338135
+  },
+  "codegen/replica_branch": {
+   "steady_ns": 73114724.33333333,
+   "tool_summary": {
+    "files": 5,
+    "points": 43235
+   },
+   "warm_ns": 76566350
+  },
+  "codegen/replica_line": {
+   "steady_ns": 67228029.66666667,
+   "tool_summary": {
+    "files": 5,
+    "points": 33626
+   },
+   "warm_ns": 72752922
+  },
+  "deltablue/minimal_line": {
+   "steady_ns": 40306587,
+   "tool_summary": {
+    "files": 2,
+    "points": 364
+   },
+   "warm_ns": 38762096
+  },
+  "deltablue/none": {
+   "steady_ns": 40021162,
+   "tool_summary": {
+    "files": 0,
+    "points": 0
+   },
+   "warm_ns": 38068967
+  },
+  "deltablue/replica_branch": {
+   "steady_ns": 40646326.333333336,
+   "tool_summary": {
+    "files": 2,
+    "points": 511
+   },
+   "warm_ns": 39684320
+  },
+  "deltablue/replica_line": {
+   "steady_ns": 45759029.333333336,
+   "tool_summary": {
+    "files": 2,
+    "points": 364
+   },
+   "warm_ns": 45397447
+  },
+  "generators/minimal_line": {
+   "steady_ns": 16813195.333333332,
+   "tool_summary": {
+    "files": 1,
+    "points": 12
+   },
+   "warm_ns": 17216211
+  },
+  "generators/none": {
+   "steady_ns": 16591682.666666666,
+   "tool_summary": {
+    "files": 0,
+    "points": 0
+   },
+   "warm_ns": 16875917
+  },
+  "generators/replica_branch": {
+   "steady_ns": 20348946.666666668,
+   "tool_summary": {
+    "files": 1,
+    "points": 16
+   },
+   "warm_ns": 21005583
+  },
+  "generators/replica_line": {
+   "steady_ns": 20561616.333333332,
+   "tool_summary": {
+    "files": 1,
+    "points": 12
+   },
+   "warm_ns": 20932563
+  },
+  "nqueens/minimal_line": {
+   "steady_ns": 77259722.66666667,
+   "tool_summary": {
+    "files": 2,
+    "points": 34
+   },
+   "warm_ns": 78245352
+  },
+  "nqueens/none": {
+   "steady_ns": 69602430.33333333,
+   "tool_summary": {
+    "files": 0,
+    "points": 0
+   },
+   "warm_ns": 70246616
+  },
+  "nqueens/replica_branch": {
+   "steady_ns": 85387398,
+   "tool_summary": {
+    "files": 2,
+    "points": 49
+   },
+   "warm_ns": 85308788
+  },
+  "nqueens/replica_line": {
+   "steady_ns": 84858166.33333333,
+   "tool_summary": {
+    "files": 2,
+    "points": 34
+   },
+   "warm_ns": 85770693
+  },
+  "richards/minimal_line": {
+   "steady_ns": 78962646.33333333,
+   "tool_summary": {
+    "files": 2,
+    "points": 270
+   },
+   "warm_ns": 80944524
+  },
+  "richards/none": {
+   "steady_ns": 80056376.66666667,
+   "tool_summary": {
+    "files": 0,
+    "points": 0
+   },
+   "warm_ns": 80689849
+  },
+  "richards/replica_branch": {
+   "steady_ns": 79292167.33333333,
+   "tool_summary": {
+    "files": 2,
+    "points": 385
+   },
+   "warm_ns": 81222358
+  },
+  "richards/replica_line": {
+   "steady_ns": 87378493,
+   "tool_summary": {
+    "files": 2,
+    "points": 270
+   },
+   "warm_ns": 88077360
+  }
+ },
+ "runs": 3
+}

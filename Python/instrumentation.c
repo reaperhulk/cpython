@@ -249,6 +249,37 @@ local_union(_Py_GlobalMonitors a, _Py_LocalMonitors b)
     return res;
 }
 
+/* Remove from an event set all tools that have no callback registered
+ * for that event.  An event with no callback delivers nothing, so there
+ * is no point rewriting bytecode for it; the instrumentation is
+ * refreshed if a callback is registered later
+ * (see _PyMonitoring_RegisterCallback). */
+static inline _Py_LocalMonitors
+monitors_with_callbacks(_Py_LocalMonitors m, PyInterpreterState *interp)
+{
+    for (int e = 0; e < _PY_MONITORING_UNGROUPED_EVENTS; e++) {
+        uint8_t tools = m.tools[e];
+        while (tools) {
+            uint8_t bit = (uint8_t)(tools & (-tools));
+            int tool = _Py_bit_length(bit) - 1;
+            tools ^= bit;
+            if (interp->monitoring_callables[tool][e] != NULL) {
+                continue;
+            }
+            if (e == PY_MONITORING_EVENT_CALL &&
+                (interp->monitoring_callables[tool][PY_MONITORING_EVENT_C_RETURN] != NULL ||
+                 interp->monitoring_callables[tool][PY_MONITORING_EVENT_C_RAISE] != NULL))
+            {
+                /* CALL instrumentation also generates the C_RETURN and
+                 * C_RAISE events. */
+                continue;
+            }
+            m.tools[e] &= ~bit;
+        }
+    }
+    return m;
+}
+
 static inline bool
 monitors_are_empty(_Py_LocalMonitors m)
 {
@@ -1072,9 +1103,11 @@ static bool
 instrumentation_cross_checks(PyInterpreterState *interp, PyCodeObject *code)
 {
     ASSERT_WORLD_STOPPED_OR_LOCKED(code);
-    _Py_LocalMonitors expected = local_union(
-        interp->monitors,
-        code->_co_monitoring->local_monitors);
+    _Py_LocalMonitors expected = monitors_with_callbacks(
+        local_union(
+            interp->monitors,
+            code->_co_monitoring->local_monitors),
+        interp);
     return monitors_equals(code->_co_monitoring->active_monitors, expected);
 }
 
@@ -1787,9 +1820,11 @@ update_instrumentation_data(PyCodeObject *code, PyInterpreterState *interp)
         }
     }
 
-    _Py_LocalMonitors all_events = local_union(
-        interp->monitors,
-        code->_co_monitoring->local_monitors);
+    _Py_LocalMonitors all_events = monitors_with_callbacks(
+        local_union(
+            interp->monitors,
+            code->_co_monitoring->local_monitors),
+        interp);
     bool multitools = multiple_tools(&all_events);
     if (code->_co_monitoring->tools == NULL && multitools) {
         code->_co_monitoring->tools = PyMem_Malloc(code_len);
@@ -1895,9 +1930,11 @@ force_instrument_lock_held(PyCodeObject *code, PyInterpreterState *interp)
     if (update_instrumentation_data(code, interp)) {
         return -1;
     }
-    _Py_LocalMonitors active_events = local_union(
-        interp->monitors,
-        code->_co_monitoring->local_monitors);
+    _Py_LocalMonitors active_events = monitors_with_callbacks(
+        local_union(
+            interp->monitors,
+            code->_co_monitoring->local_monitors),
+        interp);
     _Py_LocalMonitors new_events;
     _Py_LocalMonitors removed_events;
 
@@ -3109,6 +3146,39 @@ branch_handler_vectorcall(
     return res;
 }
 
+/* A callback for an instrumented event transitioned between NULL and
+ * non-NULL.  Events with no registered callback are not instrumented
+ * (see monitors_with_callbacks), so bytecode may need to be rewritten:
+ * bump the global instrumentation version so all code objects re-sync
+ * lazily, and refresh the code objects that are currently executing.
+ * Must be called with the world stopped. */
+static void
+reinstrument_after_callback_change(PyInterpreterState *interp)
+{
+    ASSERT_WORLD_STOPPED();
+
+    uint32_t new_version = global_version(interp) + MONITORING_VERSION_INCREMENT;
+    if (new_version == 0) {
+        /* The version counter is exhausted (2**24 instrumentation
+         * changes; set_events() raises OverflowError at this point).
+         * _PyMonitoring_RegisterCallback has no error return, so leave
+         * the stale instrumentation in place: events whose callback
+         * just became non-NULL may not be delivered. */
+        return;
+    }
+    set_global_version(_PyThreadState_GET(), new_version);
+#ifdef _Py_TIER2
+    _Py_Executors_InvalidateAll(interp, 1);
+#endif
+    if (instrument_all_executing_code_objects(interp)) {
+        /* Only fails on memory errors; there is no way to report an
+         * error from callback registration, so surface it as an
+         * unraisable exception. */
+        PyErr_FormatUnraisable("Exception ignored while re-instrumenting "
+                               "after a monitoring callback change");
+    }
+}
+
 static PyObject *make_branch_handler(int tool_id, PyObject *handler, bool right)
 {
     _PyLegacyBranchEventHandler *callback =
@@ -3152,6 +3222,9 @@ _PyMonitoring_RegisterCallback(int tool_id, int event_id, PyObject *obj)
         interp->monitoring_callables[tool_id][PY_MONITORING_EVENT_BRANCH_RIGHT] = right;
         res = interp->monitoring_callables[tool_id][PY_MONITORING_EVENT_BRANCH_LEFT];
         interp->monitoring_callables[tool_id][PY_MONITORING_EVENT_BRANCH_LEFT] = left;
+        if ((res == NULL) != (left == NULL)) {
+            reinstrument_after_callback_change(interp);
+        }
         _PyEval_StartTheWorld(interp);
         Py_XDECREF(old_right);
     }
@@ -3160,6 +3233,9 @@ _PyMonitoring_RegisterCallback(int tool_id, int event_id, PyObject *obj)
         _PyEval_StopTheWorld(interp);
         res = interp->monitoring_callables[tool_id][event_id];
         interp->monitoring_callables[tool_id][event_id] = Py_XNewRef(obj);
+        if ((res == NULL) != (obj == NULL)) {
+            reinstrument_after_callback_change(interp);
+        }
         _PyEval_StartTheWorld(interp);
     }
     if (res != NULL && Py_TYPE(res) == &_PyLegacyBranchEventHandler_Type) {
