@@ -156,6 +156,81 @@ steady state:
 | codegen/replica_branch (warm) | −4.9% | fewer instrumented opcodes to write/restore |
 | minimal_line / none modes | ±1% | unaffected, as expected |
 
+## Real-world suite: pyca/cryptography tests (labels `crypto-*`)
+
+`bench_pytest.py` runs `tests/x509 tests/hazmat/primitives` from the
+cryptography 45.0.5 sdist (3233 tests) with the abi3 wheel, under real
+coverage.py 7.10 (`coverage run --source=cryptography -m pytest ...`).
+Setup: `./python Tools/sysmon_bench/fetch_cryptography.py`.
+
+| config | baseline CPython | optimized CPython (opt 1+2+3) |
+|---|---:|---:|
+| no coverage | 26.41s (1.00x) | 26.57s (1.00x) |
+| coverage, sysmon core | 26.82s (**1.02x**) | 27.89s (1.05x) |
+| coverage, ctrace core (C tracer) | 34.07s (**1.29x**) | 33.92s (1.28x) |
+| coverage, sysmon + coverage.py patch | 27.16s (1.03x) | 26.91s (1.01x) |
+
+Takeaways: **sysmon is already dramatically faster than the C tracer on
+a real suite** (2-5% vs ~29% overhead) because DISABLE removes events
+after first hit while ctrace pays on every line forever. This suite is
+Rust/pytest-machinery heavy, so the remaining ~1s coverage delta is at
+the noise floor and interpreter-side differences don't separate here;
+they concentrate on call-dense pure-Python code (see below). All
+configurations produce byte-identical `coverage report` output
+(verified across baseline/optimized interpreters, sysmon/ctrace cores,
+stock/patched coverage).
+
+## coverage.py-side findings (coverage-sysmon.patch)
+
+Auditing coverage.py 7.10's sysmon core (`coverage/sysmon.py`) found two
+inefficiencies, fixed in `coverage-sysmon.patch`:
+
+1. **Line mode enables events it never listens to.** `sysmon_py_start`
+   sets local events `PY_RETURN | PY_RESUME | LINE`, but callbacks for
+   PY_RETURN/PY_RESUME are only registered in arcs (branch) mode — and
+   PY_RESUME is never registered at all. Every return and generator
+   resume of traced code dispatches into the interpreter's
+   instrumentation machinery to find a NULL callback, on every call,
+   forever (nothing returns DISABLE). The patch enables only `LINE` in
+   line mode and drops `PY_RESUME` in arcs mode.
+2. **`bytes_to_lines()` is computed eagerly per traced code object**, but
+   is only read by the arcs-mode callbacks. In line mode it's pure
+   warmup waste (a Python-level dict build per code object). The patch
+   builds it only when `trace_arcs` is set.
+
+Measured with **real coverage.py** under `coverage run` on the
+**unmodified baseline interpreter** (i.e. the improvement available to
+coverage.py on today's 3.14+ without any CPython change), steady-state,
+min of 3 pinned runs (`covrun_bench.py`):
+
+| workload | no coverage | stock sysmon | patched sysmon |
+|---|---:|---:|---:|
+| calls | 16.88ms | 20.72ms (1.23x) | 16.93ms (**1.00x**) |
+| generators | 16.42ms | 21.93ms (1.34x) | 16.59ms (**1.01x**) |
+| deltablue | 35.47ms | 43.27ms (1.22x) | 35.79ms (**1.01x**) |
+| richards | 80.14ms | 91.88ms (1.15x) | 81.39ms (**1.02x**) |
+
+The tool-side patch and the interpreter-side Opt 3 each independently
+eliminate this overhead class (either fixes it; together they're
+redundant but harmless). Upstreaming the coverage.py patch helps all
+existing Python 3.12-3.15 users; Opt 3 protects every sysmon tool from
+this failure mode.
+
+## Future work (not implemented)
+
+- Warmup-path walks: `force_instrument_lock_held` + `initialize_lines` +
+  `update_instrumentation_data` make ~5 passes over the bytecode with
+  redundant `_Py_GetBaseCodeUnit` calls (~3-4% of codegen warm phase).
+  Mergeable, but the measured warm overheads are already small.
+- Free-threaded builds: every DISABLE stops the world
+  (`_PyEval_StopTheWorld` is a no-op on default builds but real on FT
+  builds); coverage warmup does one STW per newly seen line/branch.
+  Batching disables or using per-code locking would matter there.
+- Specialization under `INSTRUMENTED_LINE`: instructions wrapped by a
+  stuck INSTRUMENTED_LINE (same-line loop heads in generators kept for
+  resume semantics) can never specialize; the remaining nqueens
+  minimal_line residual (~1.1x) is mostly this.
+
 ## Cumulative: coverage.py sysmon replica overhead, baseline → Opt 1+2+3
 
 Steady-state overhead vs uninstrumented (`none`), same-session numbers:

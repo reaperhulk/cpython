@@ -1,0 +1,82 @@
+{
+ "label": "crypto-opt123",
+ "python": "/home/user/cpython/python",
+ "results": {
+  "none": {
+   "best_ns": 26573016378,
+   "runs": [
+    {
+     "config": "none",
+     "elapsed_ns": 26573016378,
+     "returncode": 0,
+     "passed": 3233,
+     "summary_line": "3233 passed, 40 skipped, 12 warnings in 26.07s"
+    },
+    {
+     "config": "none",
+     "elapsed_ns": 26760284355,
+     "returncode": 0,
+     "passed": 3233,
+     "summary_line": "3233 passed, 40 skipped, 12 warnings in 26.26s"
+    }
+   ]
+  },
+  "cov_sysmon": {
+   "best_ns": 27886124630,
+   "runs": [
+    {
+     "config": "cov_sysmon",
+     "elapsed_ns": 27886124630,
+     "returncode": 0,
+     "passed": 3233,
+     "summary_line": "3233 passed, 40 skipped, 12 warnings in 27.24s"
+    },
+    {
+     "config": "cov_sysmon",
+     "elapsed_ns": 28252061520,
+     "returncode": 0,
+     "passed": 3233,
+     "summary_line": "3233 passed, 40 skipped, 12 warnings in 27.57s"
+    }
+   ]
+  },
+  "cov_ctrace": {
+   "best_ns": 33916705475,
+   "runs": [
+    {
+     "config": "cov_ctrace",
+     "elapsed_ns": 34074222831,
+     "returncode": 0,
+     "passed": 3233,
+     "summary_line": "3233 passed, 40 skipped, 12 warnings in 33.41s"
+    },
+    {
+     "config": "cov_ctrace",
+     "elapsed_ns": 33916705475,
+     "returncode": 0,
+     "passed": 3233,
+     "summary_line": "3233 passed, 40 skipped, 12 warnings in 33.26s"
+    }
+   ]
+  },
+  "cov_sysmon_patched": {
+   "best_ns": 26905530060,
+   "runs": [
+    {
+     "config": "cov_sysmon_patched",
+     "elapsed_ns": 26905530060,
+     "returncode": 0,
+     "passed": 3233,
+     "summary_line": "3233 passed, 40 skipped, 12 warnings in 26.24s"
+    },
+    {
+     "config": "cov_sysmon_patched",
+     "elapsed_ns": 27503540987,
+     "returncode": 0,
+     "passed": 3233,
+     "summary_line": "3233 passed, 40 skipped, 12 warnings in 26.83s"
+    }
+   ]
+  }
+ }
+}
