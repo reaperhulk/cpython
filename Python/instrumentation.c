@@ -1176,17 +1176,15 @@ call_instrumentation_vector(
     assert(args[1] == NULL);
     args[1] = (PyObject *)code;
     int offset = (int)(instr - _PyFrame_GetBytecode(frame));
-    /* Offset visible to user should be the offset in bytes, as that is the
-     * convention for APIs involving code offsets. */
-    int bytes_arg2 = (int)(arg2 - _PyFrame_GetBytecode(frame)) * (int)sizeof(_Py_CODEUNIT);
-    PyObject *arg2_obj = PyLong_FromLong(bytes_arg2);
-    if (arg2_obj == NULL) {
-        return -1;
-    }
-    assert(args[2] == NULL);
-    args[2] = arg2_obj;
     PyInterpreterState *interp = tstate->interp;
     uint8_t tools = get_tools_for_instruction(code, interp, offset, event);
+    /* The offset argument is boxed lazily, once we know that some tool
+     * actually has a callback registered for this event.  Tools may
+     * leave an event enabled with no callback registered (coverage.py's
+     * line mode does this for PY_RETURN and PY_RESUME), in which case
+     * the event must remain active (a callback may be registered later),
+     * but there is nothing to call and no arguments are needed. */
+    PyObject *arg2_obj = NULL;
     size_t nargsf = (size_t) nargs | PY_VECTORCALL_ARGUMENTS_OFFSET;
     PyObject **callargs = &args[1];
     int err = 0;
@@ -1195,6 +1193,23 @@ call_instrumentation_vector(
         assert(tool >= 0 && tool < 8);
         assert(tools & (1 << tool));
         tools ^= (1 << tool);
+        if (interp->monitoring_callables[tool][event] == NULL) {
+            /* No callback registered for this tool: nothing to call.
+             * This is not the same as DISABLE: the event stays active. */
+            continue;
+        }
+        if (arg2_obj == NULL) {
+            /* Offset visible to user should be the offset in bytes, as
+             * that is the convention for APIs involving code offsets. */
+            int bytes_arg2 = (int)(arg2 - _PyFrame_GetBytecode(frame))
+                             * (int)sizeof(_Py_CODEUNIT);
+            arg2_obj = PyLong_FromLong(bytes_arg2);
+            if (arg2_obj == NULL) {
+                return -1;
+            }
+            assert(args[2] == NULL);
+            args[2] = arg2_obj;
+        }
         int res = call_one_instrument(interp, tstate, callargs, nargsf, tool, event);
         if (res == 0) {
             /* Nothing to do */
@@ -1228,7 +1243,7 @@ call_instrumentation_vector(
             }
         }
     }
-    Py_DECREF(arg2_obj);
+    Py_XDECREF(arg2_obj);
     return err;
 }
 
