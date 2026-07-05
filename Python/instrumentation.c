@@ -1603,6 +1603,45 @@ initialize_lines(_PyCoLineInstrumentationData *line_data, PyCodeObject *code, in
         }
         i += length;
     }
+    /* A jump whose source and target are on the same line can never
+     * produce a LINE event: the runtime check in
+     * _Py_call_instrumentation_line() suppresses same-line transfers.
+     * Leaving such targets instrumented is pure overhead: DISABLE-style
+     * tools (coverage) never receive an event there, so they never get
+     * the chance to de-instrument the location, and the
+     * INSTRUMENTED_LINE also prevents the underlying instruction from
+     * specializing.  One-line loops (inlined comprehensions and
+     * generator expressions, chained comparisons, conditional
+     * expressions) stay de-optimized for the whole run.  So don't
+     * instrument those targets.
+     *
+     * The one arrival that must still fire on a same-line transfer is a
+     * generator/coroutine resume: after a RESUME, the first
+     * INSTRUMENTED_LINE reached reports the resumed line even if the
+     * transfer is same-line (the prev == RESUME special case in
+     * _Py_call_instrumentation_line).  Any path from a RESUME enters
+     * other lines through an instrumented location (line starts and
+     * cross-line jump targets are instrumented), so only a RESUME *on
+     * the same line as the target* can reach it with the event still
+     * pending.  Collect the lines of all resume points (RESUME with
+     * oparg > 0) and keep same-line jump targets on those lines. */
+    int resume_line_deltas[32];
+    Py_ssize_t num_resume_lines = 0;
+    bool can_prune_same_line_jumps = true;
+    if (code->co_flags & (CO_GENERATOR | CO_COROUTINE | CO_ASYNC_GENERATOR)) {
+        for (int i = code->_co_firsttraceable; i < code_len;) {
+            _Py_CODEUNIT inst = _Py_GetBaseCodeUnit(code, i);
+            if (inst.op.code == RESUME && inst.op.arg > 0) {
+                if (num_resume_lines >= 32) {
+                    /* Too many resume points to track: don't prune. */
+                    can_prune_same_line_jumps = false;
+                    break;
+                }
+                resume_line_deltas[num_resume_lines++] = get_line_delta(line_data, i);
+            }
+            i += 1 + _PyOpcode_Caches[inst.op.code];
+        }
+    }
     for (int i = code->_co_firsttraceable; i < code_len; ) {
         _Py_CODEUNIT inst =_Py_GetBaseCodeUnit(code, i);
         int opcode = inst.op.code;
@@ -1614,6 +1653,7 @@ initialize_lines(_PyCoLineInstrumentationData *line_data, PyCodeObject *code, in
             opcode = inst.op.code;
         }
         oparg = (oparg << 8) | inst.op.arg;
+        int jump_index = i;
         i += _PyInstruction_GetLength(code, i);
         int target = -1;
         switch (opcode) {
@@ -1643,7 +1683,24 @@ initialize_lines(_PyCoLineInstrumentationData *line_data, PyCodeObject *code, in
                 continue;
         }
         assert(target >= 0);
-        if (get_line_delta(line_data, target) != NO_LINE) {
+        int target_delta = get_line_delta(line_data, target);
+        if (target_delta != NO_LINE) {
+            if (can_prune_same_line_jumps &&
+                target_delta == get_line_delta(line_data, jump_index))
+            {
+                /* Same-line jump: cannot produce a LINE event, unless a
+                 * resume point shares the target's line. */
+                bool resume_on_line = false;
+                for (Py_ssize_t r = 0; r < num_resume_lines; r++) {
+                    if (resume_line_deltas[r] == target_delta) {
+                        resume_on_line = true;
+                        break;
+                    }
+                }
+                if (!resume_on_line) {
+                    continue;
+                }
+            }
             int opcode = _Py_GetBaseCodeUnit(code, target).op.code;
             if (opcode != POP_ITER) {
                 set_original_opcode(line_data, target, opcode);

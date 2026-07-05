@@ -1,0 +1,168 @@
+{
+ "label": "ab-opt1only-r2",
+ "python": "./python.opt1only",
+ "reps": 4,
+ "results": {
+  "calls/minimal_line": {
+   "steady_ns": 17428634.333333332,
+   "tool_summary": {
+    "files": 1,
+    "points": 12
+   },
+   "warm_ns": 17596221
+  },
+  "calls/none": {
+   "steady_ns": 17241446,
+   "tool_summary": {
+    "files": 0,
+    "points": 0
+   },
+   "warm_ns": 17477885
+  },
+  "calls/replica_branch": {
+   "steady_ns": 16996559.333333332,
+   "tool_summary": {
+    "files": 1,
+    "points": 17
+   },
+   "warm_ns": 17705520
+  },
+  "calls/replica_line": {
+   "steady_ns": 19760251.666666668,
+   "tool_summary": {
+    "files": 1,
+    "points": 12
+   },
+   "warm_ns": 20247763
+  },
+  "deltablue/minimal_line": {
+   "steady_ns": 39939928.666666664,
+   "tool_summary": {
+    "files": 2,
+    "points": 364
+   },
+   "warm_ns": 38548245
+  },
+  "deltablue/none": {
+   "steady_ns": 39727412,
+   "tool_summary": {
+    "files": 0,
+    "points": 0
+   },
+   "warm_ns": 37851968
+  },
+  "deltablue/replica_branch": {
+   "steady_ns": 39943863.666666664,
+   "tool_summary": {
+    "files": 2,
+    "points": 511
+   },
+   "warm_ns": 39281119
+  },
+  "deltablue/replica_line": {
+   "steady_ns": 45392249,
+   "tool_summary": {
+    "files": 2,
+    "points": 364
+   },
+   "warm_ns": 44489271
+  },
+  "hotloop/minimal_line": {
+   "steady_ns": 16516663.333333334,
+   "tool_summary": {
+    "files": 1,
+    "points": 15
+   },
+   "warm_ns": 16651626
+  },
+  "hotloop/none": {
+   "steady_ns": 16285079,
+   "tool_summary": {
+    "files": 0,
+    "points": 0
+   },
+   "warm_ns": 16860518
+  },
+  "hotloop/replica_branch": {
+   "steady_ns": 16581718.666666666,
+   "tool_summary": {
+    "files": 1,
+    "points": 21
+   },
+   "warm_ns": 16876954
+  },
+  "hotloop/replica_line": {
+   "steady_ns": 16208478,
+   "tool_summary": {
+    "files": 1,
+    "points": 15
+   },
+   "warm_ns": 16652249
+  },
+  "nqueens/minimal_line": {
+   "steady_ns": 88741473,
+   "tool_summary": {
+    "files": 2,
+    "points": 34
+   },
+   "warm_ns": 87354635
+  },
+  "nqueens/none": {
+   "steady_ns": 71218482.66666667,
+   "tool_summary": {
+    "files": 0,
+    "points": 0
+   },
+   "warm_ns": 71853730
+  },
+  "nqueens/replica_branch": {
+   "steady_ns": 93195674,
+   "tool_summary": {
+    "files": 2,
+    "points": 49
+   },
+   "warm_ns": 93622157
+  },
+  "nqueens/replica_line": {
+   "steady_ns": 93404782.66666667,
+   "tool_summary": {
+    "files": 2,
+    "points": 34
+   },
+   "warm_ns": 95040919
+  },
+  "richards/minimal_line": {
+   "steady_ns": 82890083.33333333,
+   "tool_summary": {
+    "files": 2,
+    "points": 270
+   },
+   "warm_ns": 84544372
+  },
+  "richards/none": {
+   "steady_ns": 80755461.66666667,
+   "tool_summary": {
+    "files": 0,
+    "points": 0
+   },
+   "warm_ns": 80260089
+  },
+  "richards/replica_branch": {
+   "steady_ns": 82556198,
+   "tool_summary": {
+    "files": 2,
+    "points": 385
+   },
+   "warm_ns": 84714008
+  },
+  "richards/replica_line": {
+   "steady_ns": 91516333,
+   "tool_summary": {
+    "files": 2,
+    "points": 270
+   },
+   "warm_ns": 92496289
+  }
+ },
+ "runs": 3
+}

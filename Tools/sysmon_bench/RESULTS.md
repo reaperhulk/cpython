@@ -68,3 +68,55 @@ Branch-events-with-live-callback modes (`branch_nodisable`) show +1-2% on
 some workloads, at/near the noise floor; the extra per-tool NULL check and
 lazy-boxing branch sit on that path. Coverage-style workloads gain far more
 than this costs.
+
+## Negative result: runtime same-line fast path (not landed)
+
+An attempt to make the same-line short-circuit in
+`_Py_call_instrumentation_line` cheaper (comparing raw line-delta bytes
+before decoding line numbers) measured at noise level (0 to −3%) both solo
+and stacked on Opt 1. The cost of a stuck `INSTRUMENTED_LINE` is dominated
+by the interpreter-side dispatch (stack sync, adaptive-counter pause,
+indirect dispatch) and by blocked specialization of the underlying
+instruction (e.g. `FOR_ITER` can never specialize to
+`FOR_ITER_GEN`/`FOR_ITER_RANGE` while wrapped), not by the helper's line
+decoding. Dropped in favor of Opt 2, which removes the instrumentation
+from those locations entirely.
+
+## Opt 2: don't instrument same-line jump targets (label `ab-opt1prune-*`)
+
+`initialize_lines()` marks every jump target as a LINE-event location.
+But a transfer whose source and target share a line never produces a LINE
+event (the runtime prev-line check suppresses it), so for targets reached
+*only* by same-line jumps — loop heads of inlined comprehensions/genexps,
+chained comparisons, conditional expressions — the location can never
+fire, DISABLE-style tools never get to de-instrument it, and the stuck
+`INSTRUMENTED_LINE` both costs a full dispatch every execution and blocks
+specialization of the instruction under it.
+
+Now same-line jump targets are not marked, except in
+generators/coroutines where a resume point (`RESUME` with oparg > 0)
+shares the target's line — the one case where a same-line arrival must
+still fire (the `prev == RESUME` special case; sys.settrace shows the
+yield line on every genexp resume, verified unchanged).
+
+**Independent of Opt 1** (different functions, no textual or semantic
+overlap). Measured stacked on Opt 1 with interleaved A/B rounds
+(min of 2 sessions × 3 runs each, `results/ab-opt1{only,prune}-r*.json`;
+a prior non-interleaved full-suite run was contaminated by machine noise
+and is kept as `opt2-prune-sameline-stacked-noisy.json` for honesty):
+
+| workload/mode | steady Δ | steady overhead before → after |
+|---|---:|---|
+| nqueens/replica_branch | **−8.4%** | 1.34x → 1.21x |
+| nqueens/replica_line | **−8.3%** | 1.34x → 1.22x |
+| nqueens/minimal_line | **−7.5%** | 1.21x → 1.11x |
+| richards/replica_line | **−5.7%** | 1.13x → 1.09x |
+| richards/minimal_line | −2.8% | 1.03x → 1.02x |
+| calls, deltablue, hotloop | 0 to −2% | little same-line jump content |
+| none modes | ±1.5% | noise floor |
+
+The remaining nqueens residual is in generator code objects where the
+loop head shares the yield's line (kept for resume semantics); real
+coverage.py enables PY_RESUME, whose instrumented RESUME makes those
+locations fire once and get disabled, so this matters less in practice
+than the minimal_line numbers suggest.
