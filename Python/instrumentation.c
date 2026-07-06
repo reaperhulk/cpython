@@ -1578,7 +1578,7 @@ initialize_lines(_PyCoLineInstrumentationData *line_data, PyCodeObject *code, in
         int opcode = _Py_GetBaseCodeUnit(code, i).op.code;
         int line = _PyCode_CheckLineNumber(i*(int)sizeof(_Py_CODEUNIT), &range);
         set_line_delta(line_data, i, compute_line_delta(code, line));
-        int length = _PyInstruction_GetLength(code, i);
+        int length = 1 + _PyOpcode_Caches[opcode];
         if (i < code->_co_firsttraceable) {
             set_original_opcode(line_data, i, 0);
         }
@@ -1628,7 +1628,7 @@ initialize_lines(_PyCoLineInstrumentationData *line_data, PyCodeObject *code, in
             opcode = inst.op.code;
         }
         oparg = (oparg << 8) | inst.op.arg;
-        i += _PyInstruction_GetLength(code, i);
+        i += 1 + _PyOpcode_Caches[opcode];
         int target = -1;
         switch (opcode) {
             case POP_JUMP_IF_FALSE:
@@ -1761,14 +1761,10 @@ update_instrumentation_data(PyCodeObject *code, PyInterpreterState *interp)
             PyCodeAddressRange range;
             _PyCode_InitAddressRange(code, &range);
             int max_line = code->co_firstlineno + 1;
-            _PyCode_InitAddressRange(code, &range);
-            for (int i = code->_co_firsttraceable; i < code_len; ) {
-                int line = _PyCode_CheckLineNumber(i*(int)sizeof(_Py_CODEUNIT), &range);
-                if (line > max_line) {
-                    max_line = line;
+            while (_PyLineTable_NextAddressRange(&range)) {
+                if (range.ar_line > max_line) {
+                    max_line = range.ar_line;
                 }
-                int length = _PyInstruction_GetLength(code, i);
-                i += length;
             }
             int bytes_per_entry;
             int max_delta = max_line - code->co_firstlineno;
@@ -1873,7 +1869,7 @@ force_instrument_lock_held(PyCodeObject *code, PyInterpreterState *interp)
         goto done;
     }
     /* Insert instrumentation */
-    for (int i = code->_co_firsttraceable; i < code_len; i+= _PyInstruction_GetLength(code, i)) {
+    for (int i = code->_co_firsttraceable; i < code_len;) {
         assert(_PyCode_CODE(code)[i].op.code != ENTER_EXECUTOR);
         _Py_CODEUNIT instr = _Py_GetBaseCodeUnit(code, i);
         CHECK(instr.op.code != 0);
@@ -1896,6 +1892,7 @@ force_instrument_lock_held(PyCodeObject *code, PyInterpreterState *interp)
                 add_tools(code, i, event, new_tools);
             }
         }
+        i += 1 + _PyOpcode_Caches[base_opcode];
     }
 
     // GH-103845: We need to remove both the line and instruction instrumentation before
@@ -1905,11 +1902,13 @@ force_instrument_lock_held(PyCodeObject *code, PyInterpreterState *interp)
 
     if (removed_line_tools) {
         _PyCoLineInstrumentationData *line_data = code->_co_monitoring->lines;
-        for (int i = code->_co_firsttraceable; i < code_len;) {
+        /* Non-line-start instructions and cache entries have original
+         * opcode 0 (see initialize_lines), so a per-unit walk is safe and
+         * avoids re-decoding each instruction. */
+        for (int i = code->_co_firsttraceable; i < code_len; i++) {
             if (_PyCode_GetOriginalOpcode(line_data, i)) {
                 remove_line_tools(code, i, removed_line_tools);
             }
-            i += _PyInstruction_GetLength(code, i);
         }
     }
     if (removed_per_instruction_tools) {
@@ -1932,11 +1931,10 @@ force_instrument_lock_held(PyCodeObject *code, PyInterpreterState *interp)
 
     if (new_line_tools) {
         _PyCoLineInstrumentationData *line_data = code->_co_monitoring->lines;
-        for (int i = code->_co_firsttraceable; i < code_len;) {
+        for (int i = code->_co_firsttraceable; i < code_len; i++) {
             if (_PyCode_GetOriginalOpcode(line_data, i)) {
                 add_line_tools(code, i, new_line_tools);
             }
-            i += _PyInstruction_GetLength(code, i);
         }
     }
     if (new_per_instruction_tools) {
@@ -3087,7 +3085,7 @@ static PyObject *make_branch_handler(int tool_id, PyObject *handler, bool right)
 static void
 maybe_reinstrument_for_new_callback(PyInterpreterState *interp, bool newly_registered)
 {
-    if (!newly_registered || global_version(interp) == 0) {
+    if (!newly_registered) {
         return;
     }
     uint32_t new_version = global_version(interp) + MONITORING_VERSION_INCREMENT;

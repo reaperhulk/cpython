@@ -93,6 +93,12 @@ def setup():
         path = os.path.join(_dir, f"breadth_mod_{m}.py")
         with open(path, "w") as f:
             f.write(_module_source(m))
+    # Precompile to .pyc (untimed), as in a normal dev/CI environment with a
+    # warm bytecode cache; the timed import still executes module code under
+    # tracing but does not pay the parser.
+    import compileall
+
+    compileall.compile_dir(_dir, quiet=2)
     sys.path.insert(0, _dir)
     return _dir
 

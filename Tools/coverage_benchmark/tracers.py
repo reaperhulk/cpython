@@ -27,6 +27,7 @@ Python-side bookkeeping).
 
 import os
 import sys
+import time
 
 monitoring = sys.monitoring
 TOOL_ID = monitoring.COVERAGE_ID
@@ -35,7 +36,14 @@ TOOL_ID = monitoring.COVERAGE_ID
 class ShimTracer:
     """Minimal replica of coverage.py's sysmon core."""
 
-    def __init__(self, prefixes, branch, faithful=True, disable=True):
+    def __init__(self, prefixes, branch, faithful=True, disable=True,
+                 c_callbacks=False):
+        # c_callbacks: use C-implemented recording callbacks (from _ccb.c)
+        # for LINE/BRANCH/PY_RETURN, isolating the cost of Python-function
+        # callbacks from CPython's dispatch itself.  PY_START stays a Python
+        # callback (it must call set_local_events).
+        self.c_callbacks = c_callbacks
+        self.setup_ns = 0  # time spent in set_local_events
         self.prefixes = tuple(prefixes)
         self.branch = branch
         # faithful=True enables the same local event set as coverage.py,
@@ -69,7 +77,9 @@ class ShimTracer:
                 local = events.LINE
             if self.branch:
                 local |= events.BRANCH_LEFT | events.BRANCH_RIGHT
+            t0 = time.perf_counter_ns()
             monitoring.set_local_events(TOOL_ID, code, local)
+            self.setup_ns += time.perf_counter_ns() - t0
             self.code_data[id(code)] = self.data[fn]
             self.code_objects.append(code)
         return monitoring.DISABLE
@@ -102,14 +112,24 @@ class ShimTracer:
         monitoring.use_tool_id(TOOL_ID, "bench-shim")
         events = monitoring.events
         register = monitoring.register_callback
+        if self.c_callbacks:
+            import _ccb
+
+            self.c_data = set()
+            line_cb = branch_cb = return_cb = _ccb.make_recorder(
+                monitoring.DISABLE if self.disable else None, self.c_data)
+        else:
+            line_cb = self.line
+            branch_cb = self.branch_event
+            return_cb = self.py_return
         register(TOOL_ID, events.PY_START, self.py_start)
         if self.branch:
-            register(TOOL_ID, events.PY_RETURN, self.py_return)
-            register(TOOL_ID, events.LINE, self.line)
-            register(TOOL_ID, events.BRANCH_RIGHT, self.branch_event)
-            register(TOOL_ID, events.BRANCH_LEFT, self.branch_event)
+            register(TOOL_ID, events.PY_RETURN, return_cb)
+            register(TOOL_ID, events.LINE, line_cb)
+            register(TOOL_ID, events.BRANCH_RIGHT, branch_cb)
+            register(TOOL_ID, events.BRANCH_LEFT, branch_cb)
         else:
-            register(TOOL_ID, events.LINE, self.line)
+            register(TOOL_ID, events.LINE, line_cb)
         monitoring.set_events(TOOL_ID, events.PY_START)
         monitoring.restart_events()
 
@@ -119,7 +139,14 @@ class ShimTracer:
 
     def stats(self):
         points = sum(len(v) for v in self.data.values())
-        return {"files": len(self.data), "points": points}
+        if self.c_callbacks:
+            points = len(self.c_data)
+        return {
+            "files": len(self.data),
+            "points": points,
+            "setup_ms": round(self.setup_ns / 1e6, 2),
+            "codes": len(self.code_objects),
+        }
 
 
 class RealCoverage:
@@ -217,6 +244,10 @@ def make_tracer(mode, prefixes):
         return ShimTracer(prefixes, branch=False, disable=False)
     if mode == "shim-branch-keep":
         return ShimTracer(prefixes, branch=True, disable=False)
+    if mode == "shim-line-ccb":
+        return ShimTracer(prefixes, branch=False, c_callbacks=True)
+    if mode == "shim-branch-ccb":
+        return ShimTracer(prefixes, branch=True, c_callbacks=True)
     if mode == "cov-line":
         return RealCoverage(prefixes, branch=False)
     if mode == "cov-branch":
@@ -234,6 +265,8 @@ ALL_MODES = [
     "shim-branch-min",
     "shim-line-keep",
     "shim-branch-keep",
+    "shim-line-ccb",
+    "shim-branch-ccb",
     "cov-line",
     "cov-branch",
     "settrace",

@@ -57,6 +57,7 @@ and overhead should approach zero; the real-world cost concentrates in:
 | `shim-line` / `shim-branch` | faithful replica of coverage.py's sysmon core with minimal Python callbacks — the CPython-imposed floor for this tool design |
 | `shim-line-min` / `shim-branch-min` | same but only enables events that have callbacks (drops coverage.py's callback-less `PY_RESUME`/`PY_RETURN`) |
 | `shim-line-keep` / `shim-branch-keep` | callbacks never return DISABLE — per-event dispatch cost, what non-one-shot tools pay |
+| `shim-line-ccb` / `shim-branch-ccb` | recording callbacks implemented in C (`_ccb.c`) — isolates CPython dispatch from Python-callback cost |
 | `cov-line` / `cov-branch` | the real installed coverage.py on its sysmon core |
 | `settrace` | legacy `sys.settrace` line tracer for comparison |
 
