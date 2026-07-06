@@ -249,6 +249,35 @@ local_union(_Py_GlobalMonitors a, _Py_LocalMonitors b)
     return res;
 }
 
+/* A tool with no callback registered for an event cannot observe it:
+ * dispatching the event is a no-op for that tool.  Such (tool, event)
+ * pairs are masked out at instrumentation time so the corresponding
+ * instructions are never instrumented.  If a callback is registered
+ * later, _PyMonitoring_RegisterCallback bumps the global instrumentation
+ * version, forcing re-instrumentation with the new mask.
+ *
+ * CALL is exempt because its instrumentation also drives delivery of the
+ * grouped C_RETURN and C_RAISE events, whose callbacks are registered
+ * separately. */
+static _Py_LocalMonitors
+mask_toolless_events(PyInterpreterState *interp, _Py_LocalMonitors m)
+{
+    for (int e = 0; e < _PY_MONITORING_UNGROUPED_EVENTS; e++) {
+        if (e == PY_MONITORING_EVENT_CALL) {
+            continue;
+        }
+        uint8_t tools = m.tools[e];
+        while (tools) {
+            int t = _Py_bit_length(tools) - 1;
+            tools &= ~(1 << t);
+            if (interp->monitoring_callables[t][e] == NULL) {
+                m.tools[e] &= ~(1 << t);
+            }
+        }
+    }
+    return m;
+}
+
 static inline bool
 monitors_are_empty(_Py_LocalMonitors m)
 {
@@ -1072,9 +1101,9 @@ static bool
 instrumentation_cross_checks(PyInterpreterState *interp, PyCodeObject *code)
 {
     ASSERT_WORLD_STOPPED_OR_LOCKED(code);
-    _Py_LocalMonitors expected = local_union(
-        interp->monitors,
-        code->_co_monitoring->local_monitors);
+    _Py_LocalMonitors expected = mask_toolless_events(
+        interp,
+        local_union(interp->monitors, code->_co_monitoring->local_monitors));
     return monitors_equals(code->_co_monitoring->active_monitors, expected);
 }
 
@@ -1715,9 +1744,9 @@ update_instrumentation_data(PyCodeObject *code, PyInterpreterState *interp)
         }
     }
 
-    _Py_LocalMonitors all_events = local_union(
-        interp->monitors,
-        code->_co_monitoring->local_monitors);
+    _Py_LocalMonitors all_events = mask_toolless_events(
+        interp,
+        local_union(interp->monitors, code->_co_monitoring->local_monitors));
     bool multitools = multiple_tools(&all_events);
     if (code->_co_monitoring->tools == NULL && multitools) {
         code->_co_monitoring->tools = PyMem_Malloc(code_len);
@@ -1823,9 +1852,9 @@ force_instrument_lock_held(PyCodeObject *code, PyInterpreterState *interp)
     if (update_instrumentation_data(code, interp)) {
         return -1;
     }
-    _Py_LocalMonitors active_events = local_union(
-        interp->monitors,
-        code->_co_monitoring->local_monitors);
+    _Py_LocalMonitors active_events = mask_toolless_events(
+        interp,
+        local_union(interp->monitors, code->_co_monitoring->local_monitors));
     _Py_LocalMonitors new_events;
     _Py_LocalMonitors removed_events;
 
@@ -3051,12 +3080,39 @@ static PyObject *make_branch_handler(int tool_id, PyObject *handler, bool right)
     return (PyObject *)callback;
 }
 
+/* Called with the world stopped.  If a callback was newly registered for a
+ * (tool, event) pair that previously had none, the event may have been
+ * suppressed at instrumentation time (see mask_toolless_events); bump the
+ * global version so all code objects lazily re-instrument. */
+static void
+maybe_reinstrument_for_new_callback(PyInterpreterState *interp, bool newly_registered)
+{
+    if (!newly_registered || global_version(interp) == 0) {
+        return;
+    }
+    uint32_t new_version = global_version(interp) + MONITORING_VERSION_INCREMENT;
+    if (new_version == 0) {
+        return;
+    }
+    set_global_version(_PyThreadState_GET(), new_version);
+#ifdef _Py_TIER2
+    _Py_Executors_InvalidateAll(interp, 1);
+#endif
+    if (instrument_all_executing_code_objects(interp)) {
+        PyErr_FormatUnraisable(
+            "Exception ignored while instrumenting code objects "
+            "in sys.monitoring.register_callback");
+    }
+}
+
 PyObject *
 _PyMonitoring_RegisterCallback(int tool_id, int event_id, PyObject *obj)
 {
     assert(0 <= tool_id && tool_id < PY_MONITORING_TOOL_IDS);
     assert(0 <= event_id && event_id < _PY_MONITORING_EVENTS);
     PyObject *res;
+    PyInterpreterState *interp = _PyInterpreterState_GET();
+    bool newly_registered = false;
     if (event_id == PY_MONITORING_EVENT_BRANCH) {
         PyObject *left, *right;
         if (obj == NULL) {
@@ -3074,20 +3130,24 @@ _PyMonitoring_RegisterCallback(int tool_id, int event_id, PyObject *obj)
                 return NULL;
             }
         }
-        PyInterpreterState *interp = _PyInterpreterState_GET();
         _PyEval_StopTheWorld(interp);
         PyObject *old_right = interp->monitoring_callables[tool_id][PY_MONITORING_EVENT_BRANCH_RIGHT];
         interp->monitoring_callables[tool_id][PY_MONITORING_EVENT_BRANCH_RIGHT] = right;
         res = interp->monitoring_callables[tool_id][PY_MONITORING_EVENT_BRANCH_LEFT];
         interp->monitoring_callables[tool_id][PY_MONITORING_EVENT_BRANCH_LEFT] = left;
+        newly_registered = (obj != NULL && (res == NULL || old_right == NULL));
+        maybe_reinstrument_for_new_callback(interp, newly_registered);
         _PyEval_StartTheWorld(interp);
         Py_XDECREF(old_right);
     }
     else {
-        PyInterpreterState *interp = _PyInterpreterState_GET();
         _PyEval_StopTheWorld(interp);
         res = interp->monitoring_callables[tool_id][event_id];
         interp->monitoring_callables[tool_id][event_id] = Py_XNewRef(obj);
+        newly_registered = (res == NULL && obj != NULL &&
+                            event_id < _PY_MONITORING_UNGROUPED_EVENTS &&
+                            event_id != PY_MONITORING_EVENT_CALL);
+        maybe_reinstrument_for_new_callback(interp, newly_registered);
         _PyEval_StartTheWorld(interp);
     }
     if (res != NULL && Py_TYPE(res) == &_PyLegacyBranchEventHandler_Type) {
